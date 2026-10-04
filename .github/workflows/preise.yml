@@ -1,0 +1,35 @@
+# Liest alle 15 Minuten die Preise der Shops, die heatandtimber.com im Stand-Modus führt (Shops, deren Bot-Schutz die
+# Live-Abfrage aus dem Cloudflare-Netz abweist), und liefert sie bei https://heatandtimber.com/api/stand ab. Welche Shops
+# fällig sind und in welchem Takt (15, 30, 60, 120 Minuten), entscheidet die Function. Ausweis: OIDC von GitHub Actions
+# (id-token: write); die Function nimmt nur diesen Workflow auf main an. Es gibt keine Geheimnisse in diesem Repo.
+name: preise
+on:
+  schedule:
+    - cron: '4,19,34,49 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+  actions: write
+concurrency:
+  group: preise
+  cancel-in-progress: false
+jobs:
+  lesen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preise lesen und abliefern
+        run: node lesen.mjs
+      # GitHub schaltet Zeitpläne in öffentlichen Repos nach 60 Tagen ohne Aktivität ab; das hält ihn eingeschaltet.
+      # Fällt er trotzdem aus, wird der Preisstand alt und der Datenlauf von heatandtimber meldet es.
+      - name: Zeitplan eingeschaltet halten
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          curl -sS -o /dev/null -w "enable: HTTP %{http_code}\n" -X PUT
+          -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json"
+          "https://api.github.com/repos/${{ github.repository }}/actions/workflows/preise.yml/enable"
