@@ -3,21 +3,24 @@
 // Hauptrepo (Test daneben); nach einer Änderung die Kopie im öffentlichen Repo von Hand nachführen.
 // Ablauf: OIDC-Ausweis von GitHub holen, bei https://heatandtimber.com/api/stand fragen, welche Shops im Stand-Modus
 // fällig sind (functions/api/stand.js, scripts/stand-modus.mjs), diese Shops lesen und das Ergebnis abliefern.
-// Gelesen wird wie im Datenlauf, nur mit den Feldern für Preis und Lager: WooCommerce über die Store API
-// (_fields=id,prices,is_in_stock), Shopify über /products.json (handle und Varianten mit id, price, available). Seite
-// für Seite mit Pause, Ende bei einer nicht vollen Seite (Shops schonend fragen). Scheitert ein Shop, geht das mit dem
+// Gelesen wird genau wie im Datenlauf (scripts/sammler-woo.mjs, scripts/sammler-shopify.mjs: gleiche Adressen, gleiche
+// Kennung, keine weiteren Köpfe): WooCommerce über die Store API, Shopify über /products.json; abgeliefert werden nur
+// die Felder für Preis und Lager. Bis 06.10.2026 fragte der Leser mit _fields, eigener Kennung und Accept-Kopf; Forest
+// Garden wies davon 5 von 7 Läufen ab, den Datenlauf in derselben Zeit 1 von 4. Seite für Seite mit Pause, Ende bei
+// einer nicht vollen Seite (Shops schonend fragen). Scheitert ein Shop, geht das mit dem
 // Grund an die Function (sie verlängert dann das Intervall); der Lauf endet nur rot, wenn die Function selbst nicht
 // erreichbar ist oder den Ausweis ablehnt.
 // Lauf: node lesen.mjs (in GitHub Actions mit permissions id-token: write)
 
 export const ZIEL = 'https://heatandtimber.com/api/stand';
-const KENNUNG = 'Mozilla/5.0 (heatandtimber-preise)';
+// Dieselbe Kennung wie die Sammler des Datenlaufs
+const KENNUNG = 'Mozilla/5.0 (heatandtimber-daten)';
 const warte = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export const ARTEN = {
   woo: {
     groesse: 100,
-    url: (base, seite) => `${base}/wp-json/wc/store/v1/products?per_page=100&page=${seite}&_fields=id,prices,is_in_stock`,
+    url: (base, seite) => `${base}/wp-json/wc/store/v1/products?per_page=100&page=${seite}`,
     liste: (j) => j,
     kuerzen: (d) => ({ id: d.id, prices: { price: d.prices?.price, currency_minor_unit: d.prices?.currency_minor_unit, price_range: d.prices?.price_range ?? null }, is_in_stock: d.is_in_stock }),
   },
@@ -39,7 +42,7 @@ export async function shopLesen(s, { abruf = fetch, pause = warte } = {}) {
   for (let seite = 1; seite <= 40; seite++) {
     let r;
     try {
-      r = await abruf(a.url(s.base, seite), { headers: { 'User-Agent': KENNUNG, Accept: 'application/json' }, signal: AbortSignal.timeout(30_000) });
+      r = await abruf(a.url(s.base, seite), { headers: { 'User-Agent': KENNUNG }, signal: AbortSignal.timeout(30_000) });
     } catch (e) {
       throw new Error(e?.name === 'TimeoutError' ? 'Zeitlimit' : 'Abruf gescheitert');
     }
@@ -52,7 +55,8 @@ export async function shopLesen(s, { abruf = fetch, pause = warte } = {}) {
     if (seite === 1 && !liste.length) throw new Error('leere Produktliste');
     alle.push(...liste.map(a.kuerzen));
     if (liste.length < a.groesse) break;
-    await pause(800);
+    // Pausen wie im Datenlauf (WooCommerce 800 ms, Shopify 700 ms)
+    await pause(s.art === 'woo' ? 800 : 700);
   }
   return alle;
 }
